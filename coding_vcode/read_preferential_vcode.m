@@ -105,6 +105,7 @@ function [durations, leftLookTime, rightLookTime, oofTime, soundTimes, msArray] 
     
     % Update the lists of start/type 
     starts = starts(~exclude);
+    durations = durations(~exclude);
     types = types(~exclude);
     
     trialInds = cellfun(@(s)(any(strcmpi(s, acceptable_trial_names))), types);
