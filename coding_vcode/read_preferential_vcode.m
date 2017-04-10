@@ -261,18 +261,13 @@ function [durations, leftLookTime, rightLookTime, oofTime, soundTimes, msArray] 
         end
     end
     
-
-    
-
-    
-
     durations = double((trialEnds - trialStarts)');
     
     if doOnlyDurations == 1
         return;
     end
     
-    if nargin < 3 || isempty(whichTrials)
+    if nargin < 4 || isempty(whichTrials)
         whichTrials = 1:length(trialStarts);
     end
     
