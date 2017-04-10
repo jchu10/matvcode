@@ -1,4 +1,4 @@
-function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] = ...
+function [lookingTimes, valid, oofDiffs, qualitative, lookingAtStart, msArray, trialStartsOut] = ...
     read_lookingtime_vcode(filename, lookawayThresh)
 % Reads looking times (until first lookaway) per trial for a VCode file
 % 
@@ -43,6 +43,7 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
 % frame.
 %
 % TODO: doc qualitative
+% TODO: doc lookingAtStart
 %
 % If there are over 3 output arguments specified, then the following are
 % computed:
@@ -51,7 +52,7 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
 %
 % trialStartsOut: an array containing the start time of each trial (ms)
 
-    doMsArray = nargout > 4;
+    doMsArray = nargout > 5;
     msArray = [];
     trialStarts = [];
 
@@ -158,11 +159,14 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
     fussEnds = fussStarts + double(durations(fussInds));
     talkStarts = double(starts(talkInds));
     talkEnds = talkStarts + double(durations(talkInds));
+    talkMarks = marks(talkInds);
     peekStarts = double(starts(peekInds));
     peekEnds = peekStarts + double(durations(peekInds));
     distractTimes = double(starts(distractInds));
     [fussStarts, fussEnds] = consolidate_overlapping(fussStarts, fussEnds);
-    [talkStarts, talkEnds] = consolidate_overlapping(talkStarts, talkEnds);
+    % Don't consolidate for talk events, to preserve separate transcripts.
+    % TODO: possibly consolidate into a separate event for timing purposes.
+    %[talkStarts, talkEnds] = consolidate_overlapping(talkStarts, talkEnds);
     [peekStarts, peekEnds] = consolidate_overlapping(peekStarts, peekEnds);
     
     % Now add in the out-of-frame markings.  These take precedence over any
@@ -226,14 +230,14 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
         % Make a version with OOF = looking
         lookLabelsA = lookLabels;
         lookLabelsA(lookLabelsA==2) = 1;
-        [validA, lookingTimesA, lookStartsA] = ...
+        [validA, lookingTimesA, lookStartsA, lookingAtStartA] = ...
             compute_looking_time(trialStarts, trialEnds, lookEvents, lookLabelsA); 
         
         
         % And a version with OOF = lookaway
         lookLabelsB = lookLabels;
         lookLabelsB(lookLabelsB==2) = 0;
-        [validB, lookingTimesB, lookStartsB] = ...
+        [validB, lookingTimesB, lookStartsB, lookingAtStartB] = ...
             compute_looking_time(trialStarts, trialEnds, lookEvents, lookLabelsB); 
         
         % And compare them: 
@@ -244,9 +248,10 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
         lookingTimes = (lookingTimesA + lookingTimesB)/2;
         oofDiffs = lookingTimesA - lookingTimesB;
         lookStarts = (lookStartsA + lookStartsB)/2;
+        lookingAtStart = (lookingAtStartA + lookingAtStartB) / 2; % 0.5 = OOF at start
 
     else % no out-of-frame; unambiguous looking time
-        [valid, lookingTimes, lookStarts] = ...
+        [valid, lookingTimes, lookStarts, lookingAtStart] = ...
             compute_looking_time(trialStarts, trialEnds, lookEvents, lookLabels);
         oofDiffs = zeros(size(valid));
     end
@@ -254,7 +259,7 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
     lookStarts = double(lookStarts(:)');
     
     [fussPeriods, fussTimes] = place_events(lookStarts, lookStarts + lookingTimes, fussStarts, fussEnds);
-    [talkPeriods, talkTimes] = place_events(lookStarts, lookStarts + lookingTimes, talkStarts, talkEnds);
+    [talkPeriods, talkTimes, talkTranscripts] = place_events(lookStarts, lookStarts + lookingTimes, talkStarts, talkEnds, talkMarks);
     [peekPeriods, peekTimes] = place_events(lookStarts, lookStarts + lookingTimes, peekStarts, peekEnds);
     distractPositions = place_point_events(lookStarts, lookStarts + lookingTimes, distractTimes);
     qualitative = struct();
@@ -265,7 +270,7 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
     qualitative.peekPeriods = peekPeriods;
     qualitative.peekTimes = peekTimes;
     qualitative.distractPositions = distractPositions;
-    
+    qualitative.talkTranscripts = talkTranscripts;
     
     
     function [starts, ends] = consolidate_overlapping(starts, ends)
@@ -301,8 +306,12 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
         ends = ends(sortIndex);
     end
 
-    function [timeframes, totals] = place_events(trialStarts, trialEnds, eventStarts, eventEnds)
-       % For range events only
+    function [timeframes, totals, marksByTrial] = place_events(trialStarts, trialEnds, eventStarts, eventEnds, eventMarks)
+       % For range events only; eventMarks optional
+        doMarks = nargin > 4;
+        if doMarks
+            marksByTrial = {};
+        end
         
         for iTrial = 1:length(trialStarts)
             % Find the events that overlap this trial at all
@@ -311,6 +320,10 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
                       
             timeframes{iTrial} = {};
             totals(iTrial) = 0;
+            
+            if doMarks
+                marksByTrial{iTrial} = eventMarks(theseEvents);
+            end
             
             if trialStarts(iTrial) == trialEnds(iTrial)
                 continue;
@@ -361,7 +374,7 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
         
     end
 
-    function [valid, lookingTimes, trialStarts] = compute_looking_time(trialStarts, trialEnds, lookEvents, lookLabels)
+    function [valid, lookingTimes, trialStarts, lookingAtStart] = compute_looking_time(trialStarts, trialEnds, lookEvents, lookLabels)
     % Find looking time in each trial.
         for iTrial = 1:length(trialStarts)
 
@@ -373,6 +386,7 @@ function [lookingTimes, valid, oofDiffs, qualitative, msArray, trialStartsOut] =
                 lastEvent = 0; 
             end
             isLooking = lastEvent==1;
+            lookingAtStart(iTrial) = isLooking;
 
             if ~isLooking
                 firstLook = find(lookEvents >= trialStarts(iTrial) & ...
