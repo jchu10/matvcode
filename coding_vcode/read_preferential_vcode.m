@@ -171,6 +171,10 @@ function [durations, leftLookTime, rightLookTime, oofTime, soundTimes, msArray] 
         % Move that mark to the end of the period
         allLooks(end+1) = oofEnds(i);
         allLookTypes(end+1) = lastLookType;
+        
+        % & resort
+        [allLooks, order] = sort(allLooks);
+        allLookTypes = allLookTypes(order);
     end
     
     % Add OOF events to look array and re-sort
