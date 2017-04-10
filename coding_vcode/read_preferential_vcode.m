@@ -21,8 +21,12 @@ function [durations, leftLookTime, rightLookTime, oofTime, soundTimes, msArray] 
 %         and the actual trial length is 12000, we'll start at 'start' if
 %         appropriate, then just the interval [0, 10000], THEN if using 
 %         [msA, 0] we'll take [10000+msA, 10000].
-%   lastTrialLength: minimum length of last trial to assume (VCode files 
-%     are expected to have trial markers only at the start of each trial)
+%   lastTrialLength: minimum length of last trial to assume, in ms (VCode files 
+%     are expected to have trial markers only at the start of each trial). 
+%     If a vector is given instead, override any trial markers and instead use the list of
+%     video lengths (in ms) to determine trial boundaries. VCode file is expected
+%     to have one event 'end' which marks the end of the trial, and trial lengths are
+%     scaled accordingly.
 %
 %   durations: array of durations of trials (in ms)
 %
@@ -77,7 +81,9 @@ function [durations, leftLookTime, rightLookTime, oofTime, soundTimes, msArray] 
     acceptable_outofframe_names = {'outofframe', 'outoframe', 'outoffame'};
     acceptable_delete_names = {'x', 'delete'};
     acceptable_sound_names = {'sound'};
-    other_acceptable = {'looking', 'look', 'looking time', 'nosound'};
+    acceptable_end_names = {'end', 'End'};
+    other_acceptable = {'looking', 'look', 'looking time', 'nosound', ...
+        'distract', 'peek', 'point', 'talk', 'fuss'};
 
     fid = fopen(filename);
 
@@ -115,15 +121,25 @@ function [durations, leftLookTime, rightLookTime, oofTime, soundTimes, msArray] 
     oofInds = cellfun(@(s)(any(strcmpi(s, acceptable_outofframe_names))), types);
     soundInds = cellfun(@(s)(any(strcmpi(s, acceptable_sound_names))), types);
     otherInds = cellfun(@(s)(any(strcmpi(s, other_acceptable))), types);
+    endInds   = cellfun(@(s)(any(strcmpi(s, acceptable_end_names))), types);
     allLookInds = leftInds | rightInds | awayInds;
     
-    if all(~trialInds)
+    endTime = 0;
+    if any(endInds)
+        if sum(endInds) > 1
+            warning('multiple end events listed; using first');
+        end
+        endTime = double(starts(endInds));
+        endTime = endTime(1);
+    end
+    
+    if all(~trialInds) && length(lastTrialLength) == 1
         error(['No trials marked in file ' filename]);
     elseif all(~allLookInds)
         error(['No looks right, left, or away marked in file ' filename]);
     end
     
-    knownInds = allLookInds | trialInds | soundInds | otherInds | oofInds;
+    knownInds = allLookInds | trialInds | soundInds | otherInds | oofInds | endInds;
     if not(all(knownInds))
         unknownTypes = unique(types(~knownInds));
         for i = 1:length(unknownTypes)
@@ -163,10 +179,26 @@ function [durations, leftLookTime, rightLookTime, oofTime, soundTimes, msArray] 
     [allLooks, order] = sort(allLooks);
     allLookTypes = allLookTypes(order);
 
-    trialStarts = starts(trialInds);
-    trialLengthsInit = diff(trialStarts);
-    trialEnds = [trialStarts(2:end); trialStarts(end)+max(lastTrialLength, max(trialLengthsInit(end-1:end)))];
-    
+    % Determine trial start and end times based on lastTrialLength
+    if length(lastTrialLength) > 1
+        % Scale trial lengths based on end
+        if endTime
+            if abs(endTime - sum(lastTrialLength)) > 1000
+                warning('Disparity over 1 s between trial length sum and end marker');
+            end
+            lastTrialLength = lastTrialLength * endTime / sum(lastTrialLength);
+        else
+            warning('Trial lengths given but no end marker provided; not scaling trial lengths');
+        end
+        trialBounds = round([1, 1 + cumsum(lastTrialLength)]);
+        trialStarts = trialBounds(1:end-1)';
+        trialEnds   = trialBounds(2:end)';
+    else
+        trialStarts = starts(trialInds);
+        trialLengthsInit = diff(trialStarts);
+        trialEnds = [trialStarts(2:end); trialStarts(end)+max(lastTrialLength, max(trialLengthsInit(end-1:end)))];
+    end
+        
     % Find first sound in each trial
     soundTimes = NaN(length(trialStarts), 1);
     sounds = starts(soundInds);
