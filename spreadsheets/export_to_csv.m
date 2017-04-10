@@ -16,7 +16,7 @@ fields = fieldnames(data);
 
 if isfield(data, 'DBID')
     N = length(data.DBID);
-else
+elseif isfield(data, 'age')
     N = length(data.age);
 end
 
